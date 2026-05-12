@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 import json
 import time
+import threading
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -43,6 +44,9 @@ class DiscordTelegramBot:
         # Файл для сохранения подписчиков
         self.subscribers_file = "subscribers.json"
         self.load_subscribers()
+        
+        # Ссылка на приложение Telegram для отправки сообщений
+        self.telegram_app = None
     
     def load_subscribers(self):
         """Загружает список подписчиков из файла"""
@@ -119,11 +123,12 @@ class DiscordTelegramBot:
             # Отправляем сообщение
             for recipient_id in recipients:
                 try:
-                    await telegram.Bot(token=self.TELEGRAM_TOKEN).send_message(
-                        chat_id=recipient_id,
-                        text=telegram_message,
-                        parse_mode='Markdown'
-                    )
+                    if self.telegram_app:
+                        await self.telegram_app.bot.send_message(
+                            chat_id=recipient_id,
+                            text=telegram_message,
+                            parse_mode='Markdown'
+                        )
                 except Exception as e:
                     logger.error(f"Ошибка отправки пользователю {recipient_id}: {e}")
             
@@ -170,36 +175,44 @@ class DiscordTelegramBot:
         user_id = update.effective_user.id
         user_name = update.effective_user.first_name or update.effective_user.username
         
-        # Удаляем команду /start
-        await update.message.delete()
+        logger.info(f"Получена команда /start от пользователя {user_id} ({user_name})")
         
-        # Создаем инлайн кнопки
-        if user_id in self.subscribers:
-            # Пользователь уже подписан
-            keyboard = [[InlineKeyboardButton("🔕 Отписаться", callback_data="unsubscribe")]]
-            text = f"🔔 Вы уже подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
-        else:
-            # Пользователь не подписан
-            keyboard = [[InlineKeyboardButton("🔔 Подписаться", callback_data="subscribe")]]
-            text = f"🔕 Вы не подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
-        
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        # Отправляем сообщение и закрепляем его
-        sent_message = await context.bot.send_message(
-            chat_id=user_id,
-            text=text,
-            reply_markup=reply_markup
-        )
-        
-        # Закрепляем сообщение
-        await context.bot.pin_chat_message(
-            chat_id=user_id,
-            message_id=sent_message.message_id
-        )
-        
-        # Сохраняем ID сообщения для будущего редактирования
-        self.user_messages[user_id] = sent_message.message_id
+        try:
+            # Удаляем команду /start
+            await update.message.delete()
+            
+            # Создаем инлайн кнопки
+            if user_id in self.subscribers:
+                # Пользователь уже подписан
+                keyboard = [[InlineKeyboardButton("🔕 Отписаться", callback_data="unsubscribe")]]
+                text = f"🔔 Вы уже подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
+            else:
+                # Пользователь не подписан
+                keyboard = [[InlineKeyboardButton("🔔 Подписаться", callback_data="subscribe")]]
+                text = f"🔕 Вы не подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            # Отправляем сообщение и закрепляем его
+            sent_message = await context.bot.send_message(
+                chat_id=user_id,
+                text=text,
+                reply_markup=reply_markup
+            )
+            
+            # Закрепляем сообщение
+            await context.bot.pin_chat_message(
+                chat_id=user_id,
+                message_id=sent_message.message_id
+            )
+            
+            # Сохраняем ID сообщения для будущего редактирования
+            self.user_messages[user_id] = sent_message.message_id
+            
+            logger.info(f"Отправлено сообщение /start пользователю {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке /start: {e}")
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Обработчик нажатий на инлайн кнопки"""
@@ -208,40 +221,46 @@ class DiscordTelegramBot:
         
         await query.answer()  # Показываем "загрузку" на кнопке
         
-        if query.data == "subscribe":
-            # Подписка
-            self.subscribers.add(user_id)
-            self.save_subscribers()
-            
-            # Редактируем сообщение
-            keyboard = [[InlineKeyboardButton("🔕 Отписаться", callback_data="unsubscribe")]]
-            text = f"🔔 Вы успешно подписались на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
-            
-            await query.edit_message_text(
-                text=text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-            logger.info(f"Пользователь {user_id} подписался на уведомления")
-            
-            # Отправляем последние 3 сообщения из Discord для новеньких
-            await self.send_recent_messages(user_id)
-            
-        elif query.data == "unsubscribe":
-            # Отписка
-            self.subscribers.discard(user_id)
-            self.save_subscribers()
-            
-            # Редактируем сообщение
-            keyboard = [[InlineKeyboardButton("🔔 Подписаться", callback_data="subscribe")]]
-            text = f"🔕 Вы успешно отписались от уведомлений от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
-            
-            await query.edit_message_text(
-                text=text,
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-            
-            logger.info(f"Пользователь {user_id} отписался от уведомлений")
+        logger.info(f"Нажата кнопка {query.data} пользователем {user_id}")
+        
+        try:
+            if query.data == "subscribe":
+                # Подписка
+                self.subscribers.add(user_id)
+                self.save_subscribers()
+                
+                # Редактируем сообщение
+                keyboard = [[InlineKeyboardButton("🔕 Отписаться", callback_data="unsubscribe")]]
+                text = f"🔔 Вы успешно подписались на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
+                
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+                logger.info(f"Пользователь {user_id} подписался на уведомления")
+                
+                # Отправляем последние 3 сообщения из Discord для новеньких
+                await self.send_recent_messages(user_id)
+                
+            elif query.data == "unsubscribe":
+                # Отписка
+                self.subscribers.discard(user_id)
+                self.save_subscribers()
+                
+                # Редактируем сообщение
+                keyboard = [[InlineKeyboardButton("🔔 Подписаться", callback_data="subscribe")]]
+                text = f"🔕 Вы успешно отписались от уведомлений от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
+                
+                await query.edit_message_text(
+                    text=text,
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                
+                logger.info(f"Пользователь {user_id} отписался от уведомлений")
+                
+        except Exception as e:
+            logger.error(f"Ошибка при обработке кнопки: {e}")
     
     async def send_recent_messages(self, user_id):
         """Отправляет последние 3 сообщения из Discord новому подписчику"""
@@ -253,8 +272,8 @@ class DiscordTelegramBot:
             for message in reversed(recent_messages):  # В хронологическом порядке
                 await self.forward_to_telegram(message, user_id)
     
-    async def start_monitoring(self):
-        """Запускает мониторинг канала"""
+    def start_monitoring_sync(self):
+        """Запускает мониторинг канала в синхронном режиме"""
         logger.info("Запуск мониторинга Discord канала...")
         logger.info(f"Сервер: {self.DISCORD_SERVER_ID}")
         logger.info(f"Канал: {self.DISCORD_CHANNEL_ID}")
@@ -271,15 +290,20 @@ class DiscordTelegramBot:
         # Основной цикл мониторинга
         while True:
             try:
-                await self.check_new_messages()
-                await asyncio.sleep(5)  # Проверка каждые 5 секунд
+                # Используем asyncio.run_coroutine_threadsafe для вызова async функции
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self.check_new_messages())
+                loop.close()
+                
+                time.sleep(5)  # Проверка каждые 5 секунд
                 
             except KeyboardInterrupt:
                 logger.info("Мониторинг остановлен вручную")
                 break
             except Exception as e:
                 logger.error(f"Ошибка в цикле мониторинга: {e}")
-                await asyncio.sleep(10)  # Пауза при ошибке
+                time.sleep(10)  # Пауза при ошибке
 
 def main():
     # Создаем экземпляр бота
@@ -288,27 +312,22 @@ def main():
     # Создаем приложение Telegram
     application = Application.builder().token(bot.TELEGRAM_TOKEN).build()
     
+    # Устанавливаем ссылку на приложение для отправки сообщений
+    bot.telegram_app = application
+    
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", bot.start_command))
     application.add_handler(CallbackQueryHandler(bot.button_callback))
     
     # Запускаем мониторинг Discord в отдельном потоке
-    async def run_monitoring():
-        await bot.start_monitoring()
+    monitor_thread = threading.Thread(target=bot.start_monitoring_sync, daemon=True)
+    monitor_thread.start()
     
-    # Запускаем бота и мониторинг
-    async def run_all():
-        # Запускаем мониторинг Discord
-        monitor_task = asyncio.create_task(run_monitoring())
-        
-        # Запускаем Telegram бота
-        await application.run_polling()
-        
-        # При остановке бота останавливаем и мониторинг
-        monitor_task.cancel()
+    logger.info("Запуск Telegram бота...")
     
     try:
-        asyncio.run(run_all())
+        # Запускаем Telegram бота
+        application.run_polling()
     except KeyboardInterrupt:
         logger.info("Бот остановлен вручную")
     except Exception as e:
