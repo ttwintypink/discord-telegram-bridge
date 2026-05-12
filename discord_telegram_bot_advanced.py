@@ -74,18 +74,23 @@ class DiscordTelegramBot:
         """Получает последние сообщения из Discord канала"""
         try:
             url = f"https://discord.com/api/v9/channels/{self.DISCORD_CHANNEL_ID}/messages?limit=10"
+            logger.info(f"Запрос к Discord API: {url}")
             response = requests.get(url, headers=self.headers)
+            
+            logger.info(f"Статус ответа Discord API: {response.status_code}")
             
             if response.status_code == 200:
                 messages = response.json()
+                logger.info(f"Получено {len(messages)} сообщений из Discord")
+                if messages:
+                    logger.info(f"Последнее сообщение: {messages[0].get('content', 'No content')[:50]}...")
                 return messages
             else:
-                logger.error(f"Ошибка получения сообщений: {response.status_code}")
-                return None
-                
+                logger.error(f"Ошибка Discord API: {response.status_code} - {response.text}")
+                return []
         except Exception as e:
-            logger.error(f"Ошибка при запросе к Discord API: {e}")
-            return None
+            logger.error(f"Ошибка при получении сообщений из Discord: {e}")
+            return []
     
     async def forward_to_telegram(self, message, user_id=None):
         """Отправляет сообщение в Telegram всем подписчикам или конкретному пользователю"""
@@ -155,10 +160,14 @@ class DiscordTelegramBot:
     
     async def check_new_messages(self):
         """Проверяет новые сообщения и пересылает их"""
+        logger.info("Проверка новых сообщений из Discord...")
         messages = self.get_discord_messages()
         
         if not messages:
+            logger.info("Нет новых сообщений из Discord")
             return
+        
+        logger.info(f"Получено {len(messages)} сообщений, last_message_id: {self.last_message_id}")
         
         # Сортируем сообщения по времени (новые первые)
         messages.sort(key=lambda x: x.get('id', '0'), reverse=True)
@@ -166,6 +175,7 @@ class DiscordTelegramBot:
         # Если это первый запуск, устанавливаем последнее сообщение
         if self.last_message_id is None:
             self.last_message_id = messages[0].get('id') if messages else None
+            logger.info(f"Первый запуск, установлено last_message_id: {self.last_message_id}")
             return
         
         # Ищем новые сообщения
