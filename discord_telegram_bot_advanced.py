@@ -2,7 +2,7 @@ import requests
 import asyncio
 import telegram
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 import logging
 from datetime import datetime
 import os
@@ -91,23 +91,36 @@ class DiscordTelegramBot:
             timestamp = message.get('timestamp', '')
             message_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime("%H:%M:%S %d.%m.%Y")
             
-            # Получаем информацию об авторе
+            # Получаем информацию об авторе (используем ник с сервера)
             author = message.get('author', {})
             author_name = author.get('username', 'Unknown')
-            author_display_name = author.get('global_name', author_name)
+            # Пытаемся получить ник с сервера, если есть
+            member_data = message.get('member', {})
+            server_nick = member_data.get('nick')
+            author_display_name = server_nick if server_nick else author.get('global_name', author_name)
             
-            # Получаем контент сообщения
+            # Получаем контент сообщения и убираем пинги ролей
             content = message.get('content', '')
+            # Убираем пинги ролей (@role)
+            import re
+            content = re.sub(r'<@&\d+>', '', content)
+            # Убираем символ '>' в начале сообщения
+            content = content.lstrip('>')
+            # Убираем двойные кавычки в конце, если они есть
+            if content.endswith('""'):
+                content = content[:-2]
+            # Убираем лишние пробелы после удаления пингов
+            content = content.strip()
             
             # Формируем красивое сообщение для Telegram
             telegram_message = f"""
-📨 **Новое сообщение из Discord**
+📨 *Новое сообщение из Discord*
 
 👤 *Автор:* {author_display_name} (@{author_name})
-⏰ *Время отправки:* {message_time}
+⏰ *Время отправки уведомления:* {message_time}
 
 💬 *Сообщение:*
-> {content}
+{content}
             """
             
             # Добавляем информацию о вложениях
@@ -262,6 +275,30 @@ class DiscordTelegramBot:
         except Exception as e:
             logger.error(f"Ошибка при обработке кнопки: {e}")
     
+    async def handle_all_messages(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Обработчик всех сообщений кроме команд"""
+        user_id = update.effective_user.id
+        user_name = update.effective_user.first_name or update.effective_user.username
+        
+        logger.info(f"Получено сообщение от пользователя {user_id} ({user_name})")
+        
+        try:
+            # Удаляем сообщение пользователя
+            await update.message.delete()
+            
+            error_message = "Я бот для уведомлений. Отправлять мне сообщения нельзя. \nИспользуйте команду /start для управления подпиской."
+            
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=error_message,
+                parse_mode='Markdown'
+            )
+            
+            logger.info(f"Отправлено сообщение об ошибке пользователю {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Ошибка при обработке сообщения: {e}")
+    
     async def send_recent_messages(self, user_id):
         """Отправляет последние 3 сообщения из Discord новому подписчику"""
         messages = self.get_discord_messages()
@@ -318,6 +355,9 @@ def main():
     # Добавляем обработчики
     application.add_handler(CommandHandler("start", bot.start_command))
     application.add_handler(CallbackQueryHandler(bot.button_callback))
+    
+    # Добавляем обработчик для всех сообщений кроме команд
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_all_messages))
     
     # Запускаем мониторинг Discord в отдельном потоке
     monitor_thread = threading.Thread(target=bot.start_monitoring_sync, daemon=True)
