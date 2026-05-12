@@ -112,14 +112,14 @@ class DiscordTelegramBot:
             # Убираем лишние пробелы после удаления пингов
             content = content.strip()
             
-            # Формируем красивое сообщение для Telegram
+            # Формируем красивое сообщение для Telegram (без parse_mode для смайликов)
             telegram_message = f"""
-📨 *Новое сообщение из Discord*
+📨 Новое сообщение из Discord
 
-👤 *Автор:* {author_display_name} (@{author_name})
-⏰ *Время отправки уведомления:* {message_time}
+👤 Автор: {author_display_name} (@{author_name})
+⏰ Время отправки уведомления: {message_time}
 
-💬 *Сообщение:*
+💬 Сообщение:
 {content}
             """
             
@@ -139,8 +139,7 @@ class DiscordTelegramBot:
                     if self.telegram_app:
                         await self.telegram_app.bot.send_message(
                             chat_id=recipient_id,
-                            text=telegram_message,
-                            parse_mode='Markdown'
+                            text=telegram_message
                         )
                 except Exception as e:
                     logger.error(f"Ошибка отправки пользователю {recipient_id}: {e}")
@@ -220,8 +219,8 @@ class DiscordTelegramBot:
             # Сохраняем ID сообщения для будущего редактирования
             self.user_messages[user_id] = sent_message.message_id
             
-            # Отправляем последние 3 сообщения из Discord для новеньких
-            await self.send_recent_messages(user_id)
+            # Отправляем последние 3 сообщения из Discord для новеньких (только если есть новые)
+            # await self.send_recent_messages(user_id)  # Закомментировано, чтобы не спамить старыми сообщениями
             
             logger.info(f"Пользователь {user_id} подписался на уведомления через /start")
             
@@ -254,8 +253,8 @@ class DiscordTelegramBot:
                 
                 logger.info(f"Пользователь {user_id} подписался на уведомления")
                 
-                # Отправляем последние 3 сообщения из Discord для новеньких
-                await self.send_recent_messages(user_id)
+                # Отправляем последние 3 сообщения из Discord для новеньких (только если есть новые)
+                # await self.send_recent_messages(user_id)  # Закомментировано, чтобы не спамить старыми сообщениями
                 
             elif query.data == "unsubscribe":
                 # Отписка
