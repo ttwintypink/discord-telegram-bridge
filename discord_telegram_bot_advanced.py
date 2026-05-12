@@ -194,15 +194,13 @@ class DiscordTelegramBot:
             # Удаляем команду /start
             await update.message.delete()
             
-            # Создаем инлайн кнопки
-            if user_id in self.subscribers:
-                # Пользователь уже подписан
-                keyboard = [[InlineKeyboardButton("🔕 Отписаться", callback_data="unsubscribe")]]
-                text = f"🔔 Вы уже подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
-            else:
-                # Пользователь не подписан
-                keyboard = [[InlineKeyboardButton("🔔 Подписаться", callback_data="subscribe")]]
-                text = f"🔕 Вы не подписаны на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
+            # Сразу подписываем пользователя
+            self.subscribers.add(user_id)
+            self.save_subscribers()
+            
+            # Создаем кнопку отписки
+            keyboard = [[InlineKeyboardButton("� Отписаться", callback_data="unsubscribe")]]
+            text = f"� Вы успешно подписались на уведомления от Discord-сервера '{self.DISCORD_SERVER_NAME}'"
             
             reply_markup = InlineKeyboardMarkup(keyboard)
             
@@ -222,7 +220,10 @@ class DiscordTelegramBot:
             # Сохраняем ID сообщения для будущего редактирования
             self.user_messages[user_id] = sent_message.message_id
             
-            logger.info(f"Отправлено сообщение /start пользователю {user_id}")
+            # Отправляем последние 3 сообщения из Discord для новеньких
+            await self.send_recent_messages(user_id)
+            
+            logger.info(f"Пользователь {user_id} подписался на уведомления через /start")
             
         except Exception as e:
             logger.error(f"Ошибка при обработке /start: {e}")
@@ -238,7 +239,7 @@ class DiscordTelegramBot:
         
         try:
             if query.data == "subscribe":
-                # Подписка
+                # Подписка (этот кейс не должен вызываться, но оставим для надежности)
                 self.subscribers.add(user_id)
                 self.save_subscribers()
                 
