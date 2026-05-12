@@ -21,8 +21,8 @@
 ### 1. Клонирование и установка зависимостей
 
 ```bash
-git clone <repository>
-cd discord-telegram-bot
+git clone https://github.com/ttwintypink/discord-telegram-bridge.git
+cd discord-telegram-bridge
 pip install -r requirements.txt
 ```
 
